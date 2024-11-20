@@ -1,0 +1,80 @@
+# vercel.json
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "app.py",
+            "use": "@vercel/python"
+        }
+    ],
+    "routes": [
+        {
+            "src": "/(.*)",
+            "dest": "app.py"
+        }
+    ]
+}
+
+# requirements.txt
+flask==2.0.1
+google-generativeai==0.3.0
+requests==2.31.0
+
+# app.py 修改版（适配Vercel）
+from flask import Flask, request
+import google.generativeai as genai
+import requests
+import json
+import os
+
+app = Flask(__name__)
+
+# 从环境变量获取配置
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+WECHAT_WEBHOOK = os.environ.get('WECHAT_WEBHOOK')
+
+# 初始化Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-pro')
+
+def send_to_wechat(message):
+    """发送消息到企业微信机器人"""
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "msgtype": "text",
+        "text": {
+            "content": message
+        }
+    }
+    response = requests.post(WECHAT_WEBHOOK, headers=headers, data=json.dumps(data))
+    return response.json()
+
+@app.route('/')
+def home():
+    return "Gemini Bot is running!"
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """处理来自企业微信的消息"""
+    data = request.json
+    if 'text' in data and 'content' in data['text']:
+        user_input = data['text']['content']
+        
+        try:
+            # 调用Gemini API
+            response = model.generate_content(user_input)
+            ai_response = response.text
+            
+            # 发送响应到企业微信
+            send_to_wechat(ai_response)
+            
+            return {"status": "success"}, 200
+        except Exception as e:
+            error_message = f"处理消息时出错: {str(e)}"
+            send_to_wechat(error_message)
+            return {"status": "error", "message": error_message}, 500
+    
+    return {"status": "error", "message": "无效的消息格式"}, 400
+
+# Vercel需要这个
+app.debug = True
